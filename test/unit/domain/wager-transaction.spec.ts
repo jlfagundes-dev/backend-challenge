@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import {
-  WagerTransaction,
-  WagerTransactionKind,
-  WagerTransactionStatus,
-} from "../../../src/domain/wager-transaction";
+import { WagerTransaction, WagerTransactionKind, WagerTransactionStatus } from "../../../src/domain/wager-transaction";
+import { LedgerDirection } from "../../../src/domain/ledger-entry";
 import { Money } from "../../../src/domain/value-objects/money";
-
 describe("WagerTransaction", () => {
   test("creates a BET in PENDING status", () => {
     const transaction = WagerTransaction.create(props());
@@ -65,7 +61,31 @@ describe("WagerTransaction", () => {
       "A transação já está em estado terminal",
     );
   });
+  test("matches the original payload hash", () => {
+    const transaction = WagerTransaction.create(props({ payloadHash: "hash-1" }));
+    expect(transaction.matchesPayload("hash-1")).toBe(true);
+    expect(transaction.matchesPayload("hash-2")).toBe(false);
+  });
+  test("does not affect balance for LOSS", () => {
+    const transaction = WagerTransaction.create(props({ kind: WagerTransactionKind.Loss }));
+    expect(transaction.affectsBalance()).toBe(false);
+    expect(transaction.ledgerDirectionFor()).toBeUndefined();
+  });
+  test("returns the correct Ledger direction", () => {
+    expect(WagerTransaction.create(props()).ledgerDirectionFor()).toBe(LedgerDirection.Debit);
+    expect(WagerTransaction.create(props({ kind: WagerTransactionKind.Win })).ledgerDirectionFor())
+      .toBe(LedgerDirection.Credit);
+  });
+  test("returns the inverse direction for ROLLBACK", () => {
+    const rollback = WagerTransaction.create(props({
+      kind: WagerTransactionKind.Rollback,
+      referenceExternalTransactionId: "bet-1",
+    }));
+    const bet = WagerTransaction.create(props());
+    expect(rollback.ledgerDirectionFor(bet)).toBe(LedgerDirection.Credit);
+  });
 });
+
 function money(amount: string): Money {
   return Money.from({ amount, currency: "BRL" });
 }

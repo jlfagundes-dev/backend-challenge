@@ -1,31 +1,10 @@
 import { Money } from "./value-objects/money";
-
-export enum WagerTransactionKind {
-  Opening = "OPENING",
-  Bet = "BET",
-  Win = "WIN",
-  Loss = "LOSS",
-  Refund = "REFUND",
-  Rollback = "ROLLBACK",
-}
-export enum WagerTransactionStatus {
-  Pending = "PENDING",
-  PendingReference = "PENDING_REFERENCE",
-  Processed = "PROCESSED",
-  Rejected = "REJECTED",
-  Failed = "FAILED",
-}
-export type FailureCode = string;
-export interface CreateWagerTransactionProps {
-  id: string; providerId: string; externalTransactionId: string;
-  idempotencyKey: string; payloadHash: string; walletId: string;
-  playerId: string; roundId: string; gameId: string; kind: WagerTransactionKind;
-  money: Money; referenceExternalTransactionId?: string; createdAt: Date;
-}
-export interface WagerTransactionState extends CreateWagerTransactionProps {
-  status: WagerTransactionStatus; referenceTransactionId?: string;
-  failureCode?: FailureCode; processedAt?: Date;
-}
+import { LedgerDirection } from "./ledger-entry";
+import {
+  CreateWagerTransactionProps, FailureCode, WagerTransactionKind,
+  WagerTransactionState, WagerTransactionStatus,
+} from "./wager-transaction.types";
+export * from "./wager-transaction.types";
 export class WagerTransaction {
   public readonly id: string; public readonly providerId: string;
   public readonly externalTransactionId: string; public readonly idempotencyKey: string;
@@ -61,6 +40,24 @@ export class WagerTransaction {
   get processedAt(): Date | undefined { return this._processedAt; }
   requiresReference(): boolean {
     return this.kind === WagerTransactionKind.Refund || this.kind === WagerTransactionKind.Rollback;
+  }
+  matchesPayload(payloadHash: string): boolean {
+    return this.payloadHash === payloadHash;
+  }
+  affectsBalance(): boolean {
+    return this.kind !== WagerTransactionKind.Loss;
+  }
+  ledgerDirectionFor(reference?: WagerTransaction): LedgerDirection | undefined {
+    if (this.kind === WagerTransactionKind.Loss) return undefined;
+    if (this.kind === WagerTransactionKind.Opening ||
+      this.kind === WagerTransactionKind.Win || this.kind === WagerTransactionKind.Refund) {
+      return LedgerDirection.Credit;
+    }
+    if (this.kind === WagerTransactionKind.Bet) return LedgerDirection.Debit;
+    if (!reference) throw new Error("O ROLLBACK exige uma transação de referência");
+    const direction = reference.ledgerDirectionFor();
+    if (!direction) throw new Error("A transação referenciada não possui Ledger");
+    return direction === LedgerDirection.Debit ? LedgerDirection.Credit : LedgerDirection.Debit;
   }
   markPendingReference(): void {
     this.assertMutable();

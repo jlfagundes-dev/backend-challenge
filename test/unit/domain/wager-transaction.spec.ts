@@ -36,6 +36,35 @@ describe("WagerTransaction", () => {
     expect(transaction.status).toBe(WagerTransactionStatus.Processed);
     expect(transaction.processedAt).toBeInstanceOf(Date);
   });
+  test("moves to pending reference", () => {
+    const transaction = WagerTransaction.create(props());
+    transaction.markPendingReference();
+    expect(transaction.status).toBe(WagerTransactionStatus.PendingReference);
+  });
+  test("marks a transaction as processed", () => {
+    const transaction = WagerTransaction.create(props());
+    const processedAt = new Date();
+    transaction.markProcessed("reference-1", processedAt);
+    expect(transaction.status).toBe(WagerTransactionStatus.Processed);
+    expect(transaction.referenceTransactionId).toBe("reference-1");
+    expect(transaction.processedAt).toBe(processedAt);
+  });
+  test("rejects and fails non-terminal transactions", () => {
+    const rejected = WagerTransaction.create(props());
+    rejected.reject("INSUFFICIENT_BALANCE");
+    expect(rejected.isTerminal()).toBe(true);
+    expect(rejected.failureCode).toBe("INSUFFICIENT_BALANCE");
+    const failed = WagerTransaction.create(props());
+    failed.fail("DATABASE_UNAVAILABLE");
+    expect(failed.status).toBe(WagerTransactionStatus.Failed);
+  });
+  test("does not change a terminal transaction", () => {
+    const transaction = WagerTransaction.create(props());
+    transaction.reject("BUSINESS_RULE");
+    expect(() => transaction.markPendingReference()).toThrow(
+      "A transação já está em estado terminal",
+    );
+  });
 });
 function money(amount: string): Money {
   return Money.from({ amount, currency: "BRL" });

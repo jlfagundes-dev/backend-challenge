@@ -62,8 +62,39 @@ export class WagerTransaction {
   requiresReference(): boolean {
     return this.kind === WagerTransactionKind.Refund || this.kind === WagerTransactionKind.Rollback;
   }
+  markPendingReference(): void {
+    this.assertMutable();
+    this._status = WagerTransactionStatus.PendingReference;
+  }
+  markProcessed(referenceTransactionId: string | undefined, at: Date): void {
+    this.assertMutable();
+    if (this._status !== WagerTransactionStatus.Pending &&
+      this._status !== WagerTransactionStatus.PendingReference) {
+      throw new Error("A transação não está aguardando processamento");
+    }
+    this._status = WagerTransactionStatus.Processed;
+    this._referenceTransactionId = referenceTransactionId;
+    this._processedAt = at;
+  }
+  reject(code: FailureCode): void {
+    this.assertMutable();
+    this._status = WagerTransactionStatus.Rejected;
+    this._failureCode = code;
+  }
+  fail(code: FailureCode): void {
+    this.assertMutable();
+    this._status = WagerTransactionStatus.Failed;
+    this._failureCode = code;
+  }
+  isTerminal(): boolean {
+    return [WagerTransactionStatus.Processed, WagerTransactionStatus.Rejected,
+      WagerTransactionStatus.Failed].includes(this._status);
+  }
   private static assertReference(kind: WagerTransactionKind, reference?: string): void {
     const required = kind === WagerTransactionKind.Refund || kind === WagerTransactionKind.Rollback;
     if (required && !reference) throw new Error("A transação exige uma referência externa");
+  }
+  private assertMutable(): void {
+    if (this.isTerminal()) throw new Error("A transação já está em estado terminal");
   }
 }

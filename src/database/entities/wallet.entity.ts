@@ -21,9 +21,9 @@ export class WalletEntity {
   @Property({ type: "integer" })
   version!: number;
 
-  @Property({ onCreate: () => new Date() })
+  @Property({ type: "datetime", onCreate: () => new Date() })
   createdAt!: Date;
 
-  @Property({ onCreate: () => new Date(), onUpdate: () => new Date() })
+  @Property({ type: "datetime", onCreate: () => new Date(), onUpdate: () => new Date() })
   updatedAt!: Date;
 }

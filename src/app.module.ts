@@ -5,6 +5,7 @@ import { MikroOrmUnitOfWork } from "./database/mikro-orm-unit-of-work";
 import { MikroOrmWalletRepository } from "./database/repositories/mikro-orm-wallet.repository";
 import { MikroOrmWagerTransactionRepository } from "./database/repositories/mikro-orm-wager-transaction.repository";
 import { MikroOrmLedgerRepository } from "./database/repositories/mikro-orm-ledger.repository";
+import { MikroOrmOutboxRepository } from "./database/repositories/mikro-orm-outbox.repository";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 
@@ -17,12 +18,14 @@ import { AppService } from "./app.service";
     MikroOrmWalletRepository,
     MikroOrmWagerTransactionRepository,
     MikroOrmLedgerRepository,
+    MikroOrmOutboxRepository,
   ],
   exports: [
     MikroOrmUnitOfWork,
     MikroOrmWalletRepository,
     MikroOrmWagerTransactionRepository,
     MikroOrmLedgerRepository,
+    MikroOrmOutboxRepository,
   ],
 })
 export class AppModule {}

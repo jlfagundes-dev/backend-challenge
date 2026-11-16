@@ -28,6 +28,7 @@ export interface ProcessWagerTransactionInput {
   gameId: string;
   kind: WagerTransactionKind;
   money: MoneyProps;
+  referenceExternalTransactionId?: string;
 }
 
 export interface ProcessWagerTransactionResult {
@@ -50,8 +51,9 @@ export class ProcessWagerTransactionUseCase {
   execute(input: ProcessWagerTransactionInput): Promise<ProcessWagerTransactionResult> {
     return this.unitOfWork.execute(async () => {
       // Ajuste para comportamento certo em apostas simultaneas, ja bloqueia a carteira wallet
-      if (input.kind !== WagerTransactionKind.Bet) {
-        throw new Error("Esta etapa suporta somente transações BET");
+      if (![WagerTransactionKind.Bet, WagerTransactionKind.Win,
+        WagerTransactionKind.Loss].includes(input.kind)) {
+        throw new Error("Esta etapa suporta BET, WIN e LOSS");
       }
       const money = Money.from(input.money);
       const wallet = await this.wallets.findByIdForUpdate(input.walletId);
@@ -71,15 +73,36 @@ export class ProcessWagerTransactionUseCase {
       const transaction = WagerTransaction.create({
         ...input, money, createdAt: new Date(),
       });
+      if (input.kind === WagerTransactionKind.Loss) {
+        transaction.markProcessed(undefined, new Date());
+        await this.transactions.save(transaction);
+        await this.publishProcessed(transaction);
+        return { transaction, balance: wallet.balance, idempotentReplay: false };
+      }
+      if (input.kind === WagerTransactionKind.Win &&
+        input.referenceExternalTransactionId) {
+        // Busca a referencia da aposta original (BET) que gerou o WIN
+        const reference = await this.transactions.findByProviderAndExternalId(
+          input.providerId, input.referenceExternalTransactionId,
+        );
+        if (!reference || reference.status !== "PROCESSED" ||
+          reference.kind !== WagerTransactionKind.Bet ||
+          reference.walletId !== wallet.id || reference.playerId !== wallet.playerId ||
+          reference.roundId !== input.roundId) {
+          throw new Error("A referência do WIN é inválida");
+        }
+      }
       try {
-        const change = wallet.debit(money);
+        const change = input.kind === WagerTransactionKind.Bet
+          ? wallet.debit(money) : wallet.credit(money);
         // Atualiza estado de pending para processed
         transaction.markProcessed(undefined, new Date());
         await this.wallets.save(wallet);
         await this.transactions.save(transaction);
         await this.ledger.append(WalletLedgerEntry.create({
           id: randomUUID(), walletId: wallet.id, transactionId: transaction.id,
-          direction: LedgerDirection.Debit, money,
+          direction: input.kind === WagerTransactionKind.Bet
+            ? LedgerDirection.Debit : LedgerDirection.Credit, money,
           balanceBefore: change.before, balanceAfter: change.after, createdAt: new Date(),
         }));
         await this.outbox.enqueue(OutboxMessage.enqueue(WagerTransactionProcessed.from(
@@ -97,5 +120,11 @@ export class ProcessWagerTransactionUseCase {
       }
       return { transaction, balance: wallet.balance, idempotentReplay: false };
     });
+  }
+
+  private publishProcessed(transaction: WagerTransaction): Promise<void> {
+    return this.outbox.enqueue(OutboxMessage.enqueue(WagerTransactionProcessed.from(
+      transaction, { eventId: randomUUID(), correlationId: transaction.id, occurredAt: new Date() },
+    )));
   }
 }

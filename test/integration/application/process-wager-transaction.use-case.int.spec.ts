@@ -53,12 +53,13 @@ afterAll(async () => {
   await orm.close(true);
 });
 
-const input = (id: string, key: string, amount: string) => ({
+const input = (id: string, key: string, amount: string, referenceExternalTransactionId?: string) => ({
   id, providerId: "provider-bet", externalTransactionId: id,
   idempotencyKey: key, payloadHash: `hash-${key}`, walletId,
   playerId: "bet-player", roundId: "round-1", gameId: "game-1",
   kind: WagerTransactionKind.Bet,
   money: { amount, currency: "BRL" },
+  referenceExternalTransactionId,
 });
 
 describe("ProcessWagerTransactionUseCase", () => {
@@ -82,5 +83,26 @@ describe("ProcessWagerTransactionUseCase", () => {
     expect(result.transaction.status).toBe(WagerTransactionStatus.Rejected);
     expect(result.transaction.failureCode).toBe("INSUFFICIENT_FUNDS");
     expect(result.balance.toString()).toBe("20.00");
+  });
+
+  test("credits a WIN referencing the processed BET", async () => {
+    const result = await processTransaction.execute({
+      ...input("dddddddd-dddd-4ddd-8ddd-dddddddddddd", "win-key-1", "10.00",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+      kind: WagerTransactionKind.Win,
+    });
+
+    expect(result.transaction.status).toBe(WagerTransactionStatus.Processed);
+    expect(result.balance.toString()).toBe("30.00");
+  });
+
+  test("processes LOSS without changing the balance", async () => {
+    const result = await processTransaction.execute({
+      ...input("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "loss-key-1", "10.00"),
+      kind: WagerTransactionKind.Loss,
+    });
+
+    expect(result.transaction.status).toBe(WagerTransactionStatus.Processed);
+    expect(result.balance.toString()).toBe("30.00");
   });
 });

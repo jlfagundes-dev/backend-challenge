@@ -24,6 +24,7 @@ export class WageringController {
       gameId: input.gameId,
       kind: input.kind,
       money: input.money,
+      referenceExternalTransactionId: input.referenceExternalTransactionId,
       idempotencyKey,
       payloadHash: hashPayload(input),
     });

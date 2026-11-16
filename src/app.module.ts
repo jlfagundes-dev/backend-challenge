@@ -11,7 +11,7 @@ import { CreateWalletUseCase } from "./application/create-wallet.use-case";
 import { APPLICATION_TOKENS } from "./application/tokens";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
-import { WalletController } from "./interface/http/wallet.controller";
+import { WalletController } from "./interface/http/controllers/wallet.controller";
 
 @Module({
   imports: [MikroOrmModule.forRoot(mikroOrmConfig)],

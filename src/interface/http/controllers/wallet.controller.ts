@@ -1,7 +1,7 @@
 import { Body, Controller, Post } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { CreateWalletUseCase } from "../../application/create-wallet.use-case";
-import { CreateWalletDto } from "./dtos/create-wallet.dto";
+import { CreateWalletUseCase } from "../../../application/create-wallet.use-case";
+import { CreateWalletDto } from "../dtos/create-wallet.dto";
 
 @Controller("wallets")
 export class WalletController {

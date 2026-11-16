@@ -1,0 +1,197 @@
+import { Inject, Injectable } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
+import { WalletLedgerEntry, LedgerDirection } from "../domain/ledger-entry";
+import { OutboxMessage } from "../domain/outbox-message";
+import { WagerTransactionProcessed } from "../domain/events/wager-transaction-processed";
+import { WagerTransactionRejected } from "../domain/events/wager-transaction-rejected";
+import { WagerTransactionPendingReference } from "../domain/events/wager-transaction-pending-reference";
+import {
+  WagerTransaction,
+  WagerTransactionKind,
+  WagerTransactionStatus,
+} from "../domain/wager-transaction";
+import type { LedgerRepository } from "../domain/ports/ledger-repository.port";
+import type { OutboxRepository } from "../domain/ports/outbox-repository.port";
+import type { UnitOfWork } from "../domain/ports/unit-of-work.port";
+import type { WagerTransactionRepository } from "../domain/ports/wager-transaction-repository.port";
+import type { WalletRepository } from "../domain/ports/wallet-repository.port";
+import { MoneyProps, Money } from "../domain/value-objects/money";
+import { APPLICATION_TOKENS } from "./tokens";
+
+export interface ProcessWagerTransactionInput {
+  id: string;
+  providerId: string;
+  externalTransactionId: string;
+  idempotencyKey: string;
+  payloadHash: string;
+  walletId: string;
+  playerId: string;
+  roundId: string;
+  gameId: string;
+  kind: WagerTransactionKind;
+  money: MoneyProps;
+  referenceExternalTransactionId?: string;
+}
+
+export interface ProcessWagerTransactionResult {
+  transaction: WagerTransaction;
+  balance: Money;
+  idempotentReplay: boolean;
+}
+
+@Injectable()
+export class ProcessWagerTransactionUseCase {
+  constructor(
+    @Inject(APPLICATION_TOKENS.walletRepository) private readonly wallets: WalletRepository,
+    @Inject(APPLICATION_TOKENS.transactionRepository)
+    private readonly transactions: WagerTransactionRepository,
+    @Inject(APPLICATION_TOKENS.ledgerRepository) private readonly ledger: LedgerRepository,
+    @Inject(APPLICATION_TOKENS.outboxRepository) private readonly outbox: OutboxRepository,
+    @Inject(APPLICATION_TOKENS.unitOfWork) private readonly unitOfWork: UnitOfWork,
+  ) {}
+
+  execute(input: ProcessWagerTransactionInput): Promise<ProcessWagerTransactionResult> {
+    return this.unitOfWork.execute(async () => {
+      // Ajuste para comportamento certo em apostas simultaneas, ja bloqueia a carteira wallet
+      if (![WagerTransactionKind.Bet, WagerTransactionKind.Win,
+        WagerTransactionKind.Loss].includes(input.kind)) {
+        throw new Error("Esta etapa suporta BET, WIN e LOSS");
+      }
+      const money = Money.from(input.money);
+      const wallet = await this.wallets.findByIdForUpdate(input.walletId);
+      if (!wallet) throw new Error("Wallet não encontrada");
+      if (wallet.playerId !== input.playerId) throw new Error("A Wallet não pertence ao player");
+
+      // Procura uma transação já processada
+      const existing = await this.transactions.findByIdempotencyKey(input.idempotencyKey);
+      if (existing) {
+        // Valida suspeitas de fraude por exemplo mesmo idempotencyKey, um é de 100 e outra de 200, ou seja, payload divergente
+        if (!existing.matchesPayload(input.payloadHash)) {
+          throw new Error("Conflito de idempotência: payload divergente");
+        }
+        return { transaction: existing, balance: wallet.balance, idempotentReplay: true };
+      }
+
+      const transaction = WagerTransaction.create({
+        ...input, money, createdAt: new Date(),
+      });
+      if (transaction.requiresReference()) {
+        const reference = await this.transactions.findByProviderAndExternalId(
+          input.providerId, input.referenceExternalTransactionId!,
+        );
+        if (!reference) {
+          // Permite entrega fora de ordem.
+          transaction.markPendingReference();
+          await this.transactions.save(transaction);
+          await this.outbox.enqueue(OutboxMessage.enqueue(
+            WagerTransactionPendingReference.from(transaction, {
+              eventId: randomUUID(), aggregateId: wallet.id,
+              correlationId: transaction.id, occurredAt: new Date(),
+            }),
+          ));
+          return { transaction, balance: wallet.balance, idempotentReplay: false };
+        }
+        const validReference = reference.status === WagerTransactionStatus.Processed &&
+          reference.walletId === wallet.id && reference.playerId === wallet.playerId &&
+          reference.roundId === input.roundId && reference.money.equals(money) &&
+          (input.kind === WagerTransactionKind.Refund
+            ? reference.kind === WagerTransactionKind.Bet
+            : [WagerTransactionKind.Bet, WagerTransactionKind.Win,
+              WagerTransactionKind.Refund].includes(reference.kind));
+        if (!validReference || await this.transactions.findByReferenceAndKind(
+          input.providerId, reference.externalTransactionId, input.kind,
+        )) {
+          // Reversão só pode ocorrer uma vez.
+          transaction.reject("INVALID_OR_DUPLICATE_REFERENCE");
+          await this.transactions.save(transaction);
+          await this.publishRejected(transaction);
+          return { transaction, balance: wallet.balance, idempotentReplay: false };
+        }
+        // Rollback usa a direção inversa da referência.
+        const direction = transaction.ledgerDirectionFor(reference);
+        if (!direction) throw new Error("A reversão precisa produzir um lançamento");
+        try {
+          const change = direction === LedgerDirection.Debit
+            ? wallet.debit(money) : wallet.credit(money);
+          transaction.markProcessed(reference.id, new Date());
+          await this.wallets.save(wallet);
+          await this.transactions.save(transaction);
+          await this.ledger.append(WalletLedgerEntry.create({
+            id: randomUUID(), walletId: wallet.id, transactionId: transaction.id,
+            direction, money, balanceBefore: change.before, balanceAfter: change.after,
+            createdAt: new Date(),
+          }));
+          await this.publishProcessed(transaction);
+          return { transaction, balance: wallet.balance, idempotentReplay: false };
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes("Saldo insuficiente")) {
+            throw error;
+          }
+          transaction.reject("REVERSAL_NEGATIVE_BALANCE");
+          await this.transactions.save(transaction);
+          await this.publishRejected(transaction);
+          return { transaction, balance: wallet.balance, idempotentReplay: false };
+        }
+      }
+      if (input.kind === WagerTransactionKind.Loss) {
+        transaction.markProcessed(undefined, new Date());
+        await this.transactions.save(transaction);
+        await this.publishProcessed(transaction);
+        return { transaction, balance: wallet.balance, idempotentReplay: false };
+      }
+      if (input.kind === WagerTransactionKind.Win &&
+        input.referenceExternalTransactionId) {
+        // Busca a referencia da aposta original (BET) que gerou o WIN
+        const reference = await this.transactions.findByProviderAndExternalId(
+          input.providerId, input.referenceExternalTransactionId,
+        );
+        if (!reference || reference.status !== "PROCESSED" ||
+          reference.kind !== WagerTransactionKind.Bet ||
+          reference.walletId !== wallet.id || reference.playerId !== wallet.playerId ||
+          reference.roundId !== input.roundId) {
+          throw new Error("A referência do WIN é inválida");
+        }
+      }
+      try {
+        const change = input.kind === WagerTransactionKind.Bet
+          ? wallet.debit(money) : wallet.credit(money);
+        // Atualiza estado de pending para processed
+        transaction.markProcessed(undefined, new Date());
+        await this.wallets.save(wallet);
+        await this.transactions.save(transaction);
+        await this.ledger.append(WalletLedgerEntry.create({
+          id: randomUUID(), walletId: wallet.id, transactionId: transaction.id,
+          direction: input.kind === WagerTransactionKind.Bet
+            ? LedgerDirection.Debit : LedgerDirection.Credit, money,
+          balanceBefore: change.before, balanceAfter: change.after, createdAt: new Date(),
+        }));
+        await this.outbox.enqueue(OutboxMessage.enqueue(WagerTransactionProcessed.from(
+          transaction, { eventId: randomUUID(), correlationId: transaction.id, occurredAt: new Date() },
+        )));
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes("Saldo insuficiente")) throw error;
+        transaction.reject("INSUFFICIENT_FUNDS");
+        // Salva a transação rejeitada para auditoria
+        await this.transactions.save(transaction);
+        await this.outbox.enqueue(OutboxMessage.enqueue(WagerTransactionRejected.from(
+          transaction, { eventId: randomUUID(), aggregateId: wallet.id,
+            correlationId: transaction.id, occurredAt: new Date() },
+        )));
+      }
+      return { transaction, balance: wallet.balance, idempotentReplay: false };
+    });
+  }
+
+  private publishProcessed(transaction: WagerTransaction): Promise<void> {
+    return this.outbox.enqueue(OutboxMessage.enqueue(WagerTransactionProcessed.from(
+      transaction, { eventId: randomUUID(), correlationId: transaction.id, occurredAt: new Date() },
+    )));
+  }
+
+  private publishRejected(transaction: WagerTransaction): Promise<void> {
+    return this.outbox.enqueue(OutboxMessage.enqueue(WagerTransactionRejected.from(
+      transaction, { eventId: randomUUID(), aggregateId: transaction.walletId,
+        correlationId: transaction.id, occurredAt: new Date() },
+    )));
+  }
+}

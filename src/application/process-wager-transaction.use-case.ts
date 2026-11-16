@@ -49,18 +49,7 @@ export class ProcessWagerTransactionUseCase {
 
   execute(input: ProcessWagerTransactionInput): Promise<ProcessWagerTransactionResult> {
     return this.unitOfWork.execute(async () => {
-      // Procura uma transação já processada
-      const existing = await this.transactions.findByIdempotencyKey(input.idempotencyKey);
-      if (existing) {
-        // Valida suspeitas de fraude por exemplo mesmo idempotencyKey, um é de 100 e outra de 200, ou seja, payload divergente
-        if (!existing.matchesPayload(input.payloadHash)) {
-          throw new Error("Conflito de idempotência: payload divergente");
-        }
-        const wallet = await this.wallets.findById(input.walletId);
-        if (!wallet) throw new Error("Wallet não encontrada");
-        return { transaction: existing, balance: wallet.balance, idempotentReplay: true };
-      }
-
+      // Ajuste para comportamento certo em apostas simultaneas, ja bloqueia a carteira wallet
       if (input.kind !== WagerTransactionKind.Bet) {
         throw new Error("Esta etapa suporta somente transações BET");
       }
@@ -68,6 +57,16 @@ export class ProcessWagerTransactionUseCase {
       const wallet = await this.wallets.findByIdForUpdate(input.walletId);
       if (!wallet) throw new Error("Wallet não encontrada");
       if (wallet.playerId !== input.playerId) throw new Error("A Wallet não pertence ao player");
+
+      // Procura uma transação já processada
+      const existing = await this.transactions.findByIdempotencyKey(input.idempotencyKey);
+      if (existing) {
+        // Valida suspeitas de fraude por exemplo mesmo idempotencyKey, um é de 100 e outra de 200, ou seja, payload divergente
+        if (!existing.matchesPayload(input.payloadHash)) {
+          throw new Error("Conflito de idempotência: payload divergente");
+        }
+        return { transaction: existing, balance: wallet.balance, idempotentReplay: true };
+      }
 
       const transaction = WagerTransaction.create({
         ...input, money, createdAt: new Date(),

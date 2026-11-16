@@ -105,4 +105,43 @@ describe("ProcessWagerTransactionUseCase", () => {
     expect(result.transaction.status).toBe(WagerTransactionStatus.Processed);
     expect(result.balance.toString()).toBe("30.00");
   });
+
+  test("processes REFUND only once for a BET", async () => {
+    const result = await processTransaction.execute({
+      ...input("ffffffff-ffff-4fff-8fff-ffffffffffff", "refund-key-1", "80.00",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+      kind: WagerTransactionKind.Refund,
+    });
+
+    expect(result.transaction.status).toBe(WagerTransactionStatus.Processed);
+    expect(result.balance.toString()).toBe("110.00");
+    const duplicate = await processTransaction.execute({
+      ...input("12121212-1212-4121-8121-121212121212", "refund-key-2", "80.00",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+      kind: WagerTransactionKind.Refund,
+    });
+    expect(duplicate.transaction.status).toBe(WagerTransactionStatus.Rejected);
+  });
+
+  test("processes ROLLBACK as the inverse of a WIN", async () => {
+    const result = await processTransaction.execute({
+      ...input("13131313-1313-4131-8131-131313131313", "rollback-key-1", "10.00",
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+      kind: WagerTransactionKind.Rollback,
+    });
+
+    expect(result.transaction.status).toBe(WagerTransactionStatus.Processed);
+    expect(result.balance.toString()).toBe("100.00");
+  });
+
+  test("stores a reversal with a missing reference as pending", async () => {
+    const result = await processTransaction.execute({
+      ...input("14141414-1414-4141-8141-141414141414", "pending-key-1", "10.00",
+        "missing-reference"),
+      kind: WagerTransactionKind.Refund,
+    });
+
+    expect(result.transaction.status).toBe(WagerTransactionStatus.PendingReference);
+    expect(result.balance.toString()).toBe("100.00");
+  });
 });

@@ -4,9 +4,11 @@ import { WalletLedgerEntry, LedgerDirection } from "../domain/ledger-entry";
 import { OutboxMessage } from "../domain/outbox-message";
 import { WagerTransactionProcessed } from "../domain/events/wager-transaction-processed";
 import { WagerTransactionRejected } from "../domain/events/wager-transaction-rejected";
+import { WagerTransactionPendingReference } from "../domain/events/wager-transaction-pending-reference";
 import {
   WagerTransaction,
   WagerTransactionKind,
+  WagerTransactionStatus,
 } from "../domain/wager-transaction";
 import type { LedgerRepository } from "../domain/ports/ledger-repository.port";
 import type { OutboxRepository } from "../domain/ports/outbox-repository.port";
@@ -73,6 +75,64 @@ export class ProcessWagerTransactionUseCase {
       const transaction = WagerTransaction.create({
         ...input, money, createdAt: new Date(),
       });
+      if (transaction.requiresReference()) {
+        const reference = await this.transactions.findByProviderAndExternalId(
+          input.providerId, input.referenceExternalTransactionId!,
+        );
+        if (!reference) {
+          // Permite entrega fora de ordem.
+          transaction.markPendingReference();
+          await this.transactions.save(transaction);
+          await this.outbox.enqueue(OutboxMessage.enqueue(
+            WagerTransactionPendingReference.from(transaction, {
+              eventId: randomUUID(), aggregateId: wallet.id,
+              correlationId: transaction.id, occurredAt: new Date(),
+            }),
+          ));
+          return { transaction, balance: wallet.balance, idempotentReplay: false };
+        }
+        const validReference = reference.status === WagerTransactionStatus.Processed &&
+          reference.walletId === wallet.id && reference.playerId === wallet.playerId &&
+          reference.roundId === input.roundId && reference.money.equals(money) &&
+          (input.kind === WagerTransactionKind.Refund
+            ? reference.kind === WagerTransactionKind.Bet
+            : [WagerTransactionKind.Bet, WagerTransactionKind.Win,
+              WagerTransactionKind.Refund].includes(reference.kind));
+        if (!validReference || await this.transactions.findByReferenceAndKind(
+          input.providerId, reference.externalTransactionId, input.kind,
+        )) {
+          // Reversão só pode ocorrer uma vez.
+          transaction.reject("INVALID_OR_DUPLICATE_REFERENCE");
+          await this.transactions.save(transaction);
+          await this.publishRejected(transaction);
+          return { transaction, balance: wallet.balance, idempotentReplay: false };
+        }
+        // Rollback usa a direção inversa da referência.
+        const direction = transaction.ledgerDirectionFor(reference);
+        if (!direction) throw new Error("A reversão precisa produzir um lançamento");
+        try {
+          const change = direction === LedgerDirection.Debit
+            ? wallet.debit(money) : wallet.credit(money);
+          transaction.markProcessed(reference.id, new Date());
+          await this.wallets.save(wallet);
+          await this.transactions.save(transaction);
+          await this.ledger.append(WalletLedgerEntry.create({
+            id: randomUUID(), walletId: wallet.id, transactionId: transaction.id,
+            direction, money, balanceBefore: change.before, balanceAfter: change.after,
+            createdAt: new Date(),
+          }));
+          await this.publishProcessed(transaction);
+          return { transaction, balance: wallet.balance, idempotentReplay: false };
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes("Saldo insuficiente")) {
+            throw error;
+          }
+          transaction.reject("REVERSAL_NEGATIVE_BALANCE");
+          await this.transactions.save(transaction);
+          await this.publishRejected(transaction);
+          return { transaction, balance: wallet.balance, idempotentReplay: false };
+        }
+      }
       if (input.kind === WagerTransactionKind.Loss) {
         transaction.markProcessed(undefined, new Date());
         await this.transactions.save(transaction);
@@ -125,6 +185,13 @@ export class ProcessWagerTransactionUseCase {
   private publishProcessed(transaction: WagerTransaction): Promise<void> {
     return this.outbox.enqueue(OutboxMessage.enqueue(WagerTransactionProcessed.from(
       transaction, { eventId: randomUUID(), correlationId: transaction.id, occurredAt: new Date() },
+    )));
+  }
+
+  private publishRejected(transaction: WagerTransaction): Promise<void> {
+    return this.outbox.enqueue(OutboxMessage.enqueue(WagerTransactionRejected.from(
+      transaction, { eventId: randomUUID(), aggregateId: transaction.walletId,
+        correlationId: transaction.id, occurredAt: new Date() },
     )));
   }
 }

@@ -32,6 +32,17 @@ export class MikroOrmWagerTransactionRepository implements WagerTransactionRepos
     return entity ? WagerTransactionMapper.toDomain(entity) : null;
   }
 
+  async findByReferenceAndKind(
+    providerId: string,
+    referenceExternalTransactionId: string,
+    kind: WagerTransaction["kind"],
+  ): Promise<WagerTransaction | null> {
+    const entity = await this.em.findOne(WagerTransactionEntity, {
+      providerId, referenceExternalTransactionId, kind,
+    });
+    return entity ? WagerTransactionMapper.toDomain(entity) : null;
+  }
+
   async save(transaction: WagerTransaction): Promise<void> {
     const entity = await this.em.findOne(WagerTransactionEntity, {
       id: transaction.id,

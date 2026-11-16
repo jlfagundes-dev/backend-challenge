@@ -7,5 +7,10 @@ export interface WagerTransactionRepository {
     providerId: string,
     externalTransactionId: string,
   ): Promise<WagerTransaction | null>;
+  findByReferenceAndKind(
+    providerId: string,
+    referenceExternalTransactionId: string,
+    kind: WagerTransaction["kind"],
+  ): Promise<WagerTransaction | null>;
   save(transaction: WagerTransaction): Promise<void>;
 }

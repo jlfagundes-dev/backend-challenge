@@ -8,6 +8,7 @@ export class MikroOrmUnitOfWork implements UnitOfWork {
 
   // Garante sucesso ou rollback de de todo fluxo (Wallet, Wager, Ledger e Outbox da mensagem)
   async execute<T>(work: () => Promise<T>): Promise<T> {
+    if (this.em.isInTransaction()) return work(); // Não abre nova transação se já existir uma em andamento
     await this.em.begin(); // inicia a transação
     try {
       const result = await work();

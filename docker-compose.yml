@@ -1,4 +1,14 @@
 services:
+  localstack:
+    image: localstack/localstack:3.7.2
+    container_name: wagering-localstack
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
   postgres:
     image: postgres:16-alpine
     container_name: wagering-postgres
@@ -19,3 +29,4 @@ services:
 
 volumes:
   postgres_data:
+  localstack_data:

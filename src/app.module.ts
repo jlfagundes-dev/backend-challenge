@@ -1,5 +1,6 @@
 import { MikroOrmModule } from "@mikro-orm/nestjs";
 import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
 import mikroOrmConfig from "./database/mikro-orm.config";
 import { MikroOrmUnitOfWork } from "./database/mikro-orm-unit-of-work";
 import { MikroOrmWalletRepository } from "./database/repositories/mikro-orm-wallet.repository";
@@ -18,7 +19,13 @@ import { SqsWagerConsumer } from "./interface/messaging/sqs-wager.consumer";
 import { SqsOutboxPublisher } from "./interface/messaging/sqs-outbox.publisher";
 
 @Module({
-  imports: [MikroOrmModule.forRoot(mikroOrmConfig)],
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ".env",
+    }),
+    MikroOrmModule.forRoot(mikroOrmConfig)
+  ],
   controllers: [AppController, WalletController, WageringController],
   providers: [
     AppService,

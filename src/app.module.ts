@@ -15,6 +15,7 @@ import { WalletController } from "./interface/http/controllers/wallet.controller
 import { ProcessWagerTransactionUseCase } from "./application/process-wager-transaction.use-case";
 import { WageringController } from "./interface/http/controllers/wagering.controller";
 import { SqsWagerConsumer } from "./interface/messaging/sqs-wager.consumer";
+import { SqsOutboxPublisher } from "./interface/messaging/sqs-outbox.publisher";
 
 @Module({
   imports: [MikroOrmModule.forRoot(mikroOrmConfig)],
@@ -30,6 +31,7 @@ import { SqsWagerConsumer } from "./interface/messaging/sqs-wager.consumer";
     CreateWalletUseCase,
     ProcessWagerTransactionUseCase,
     SqsWagerConsumer,
+    SqsOutboxPublisher,
     { provide: APPLICATION_TOKENS.walletRepository, useExisting: MikroOrmWalletRepository },
     { provide: APPLICATION_TOKENS.transactionRepository, useExisting: MikroOrmWagerTransactionRepository },
     { provide: APPLICATION_TOKENS.ledgerRepository, useExisting: MikroOrmLedgerRepository },

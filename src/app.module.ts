@@ -13,10 +13,11 @@ import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { WalletController } from "./interface/http/controllers/wallet.controller";
 import { ProcessWagerTransactionUseCase } from "./application/process-wager-transaction.use-case";
+import { WageringController } from "./interface/http/controllers/wagering.controller";
 
 @Module({
   imports: [MikroOrmModule.forRoot(mikroOrmConfig)],
-  controllers: [AppController, WalletController],
+  controllers: [AppController, WalletController, WageringController],
   providers: [
     AppService,
     MikroOrmUnitOfWork,

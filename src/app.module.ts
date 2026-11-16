@@ -1,5 +1,6 @@
 import { MikroOrmModule } from "@mikro-orm/nestjs";
 import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
 import mikroOrmConfig from "./database/mikro-orm.config";
 import { MikroOrmUnitOfWork } from "./database/mikro-orm-unit-of-work";
 import { MikroOrmWalletRepository } from "./database/repositories/mikro-orm-wallet.repository";
@@ -14,9 +15,17 @@ import { AppService } from "./app.service";
 import { WalletController } from "./interface/http/controllers/wallet.controller";
 import { ProcessWagerTransactionUseCase } from "./application/process-wager-transaction.use-case";
 import { WageringController } from "./interface/http/controllers/wagering.controller";
+import { SqsWagerConsumer } from "./interface/messaging/sqs-wager.consumer";
+import { SqsOutboxPublisher } from "./interface/messaging/sqs-outbox.publisher";
 
 @Module({
-  imports: [MikroOrmModule.forRoot(mikroOrmConfig)],
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ".env",
+    }),
+    MikroOrmModule.forRoot(mikroOrmConfig)
+  ],
   controllers: [AppController, WalletController, WageringController],
   providers: [
     AppService,
@@ -28,10 +37,13 @@ import { WageringController } from "./interface/http/controllers/wagering.contro
     MikroOrmInboxRepository,
     CreateWalletUseCase,
     ProcessWagerTransactionUseCase,
+    SqsWagerConsumer,
+    SqsOutboxPublisher,
     { provide: APPLICATION_TOKENS.walletRepository, useExisting: MikroOrmWalletRepository },
     { provide: APPLICATION_TOKENS.transactionRepository, useExisting: MikroOrmWagerTransactionRepository },
     { provide: APPLICATION_TOKENS.ledgerRepository, useExisting: MikroOrmLedgerRepository },
     { provide: APPLICATION_TOKENS.outboxRepository, useExisting: MikroOrmOutboxRepository },
+    { provide: APPLICATION_TOKENS.inboxRepository, useExisting: MikroOrmInboxRepository },
     { provide: APPLICATION_TOKENS.unitOfWork, useExisting: MikroOrmUnitOfWork },
   ],
   exports: [

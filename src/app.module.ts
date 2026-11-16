@@ -12,6 +12,7 @@ import { APPLICATION_TOKENS } from "./application/tokens";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { WalletController } from "./interface/http/controllers/wallet.controller";
+import { ProcessWagerTransactionUseCase } from "./application/process-wager-transaction.use-case";
 
 @Module({
   imports: [MikroOrmModule.forRoot(mikroOrmConfig)],
@@ -25,6 +26,7 @@ import { WalletController } from "./interface/http/controllers/wallet.controller
     MikroOrmOutboxRepository,
     MikroOrmInboxRepository,
     CreateWalletUseCase,
+    ProcessWagerTransactionUseCase,
     { provide: APPLICATION_TOKENS.walletRepository, useExisting: MikroOrmWalletRepository },
     { provide: APPLICATION_TOKENS.transactionRepository, useExisting: MikroOrmWagerTransactionRepository },
     { provide: APPLICATION_TOKENS.ledgerRepository, useExisting: MikroOrmLedgerRepository },
@@ -39,6 +41,7 @@ import { WalletController } from "./interface/http/controllers/wallet.controller
     MikroOrmOutboxRepository,
     MikroOrmInboxRepository,
     CreateWalletUseCase,
+    ProcessWagerTransactionUseCase,
   ],
 })
 export class AppModule {}

@@ -30,14 +30,15 @@ describe("MikroOrmOutboxRepository", () => {
     await orm.em.fork().transactional(async (em) => {
       const transactionalRepository = new MikroOrmOutboxRepository(em);
       const claimed = await transactionalRepository.claimDue(new Date(), 10);
-      expect(claimed).toHaveLength(1);
-      expect(claimed[0].id).toBe(messageId);
-      claimed[0].markPublished(new Date());
-      await transactionalRepository.save(claimed[0]);
+      // Marca a mensagem como publicada sem assumir que não há outras pendentes.
+      const claimedMessage = claimed.find((item) => item.id === messageId);
+      expect(claimedMessage).toBeDefined();
+      claimedMessage?.markPublished(new Date());
+      if (claimedMessage) await transactionalRepository.save(claimedMessage);
     });
     const remaining = await orm.em.fork().transactional((em) =>
       new MikroOrmOutboxRepository(em).claimDue(new Date(), 10),
     );
-    expect(remaining).toHaveLength(0);
+    expect(remaining.some((item) => item.id === messageId)).toBe(false);
   });
 });

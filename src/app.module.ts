@@ -7,6 +7,8 @@ import { MikroOrmWagerTransactionRepository } from "./database/repositories/mikr
 import { MikroOrmLedgerRepository } from "./database/repositories/mikro-orm-ledger.repository";
 import { MikroOrmOutboxRepository } from "./database/repositories/mikro-orm-outbox.repository";
 import { MikroOrmInboxRepository } from "./database/repositories/mikro-orm-inbox.repository";
+import { CreateWalletUseCase } from "./application/create-wallet.use-case";
+import { APPLICATION_TOKENS } from "./application/tokens";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 
@@ -21,6 +23,12 @@ import { AppService } from "./app.service";
     MikroOrmLedgerRepository,
     MikroOrmOutboxRepository,
     MikroOrmInboxRepository,
+    CreateWalletUseCase,
+    { provide: APPLICATION_TOKENS.walletRepository, useExisting: MikroOrmWalletRepository },
+    { provide: APPLICATION_TOKENS.transactionRepository, useExisting: MikroOrmWagerTransactionRepository },
+    { provide: APPLICATION_TOKENS.ledgerRepository, useExisting: MikroOrmLedgerRepository },
+    { provide: APPLICATION_TOKENS.outboxRepository, useExisting: MikroOrmOutboxRepository },
+    { provide: APPLICATION_TOKENS.unitOfWork, useExisting: MikroOrmUnitOfWork },
   ],
   exports: [
     MikroOrmUnitOfWork,
@@ -29,6 +37,7 @@ import { AppService } from "./app.service";
     MikroOrmLedgerRepository,
     MikroOrmOutboxRepository,
     MikroOrmInboxRepository,
+    CreateWalletUseCase,
   ],
 })
 export class AppModule {}
